@@ -2951,12 +2951,6 @@ port_key=$(printf "%x" $(fetch_column port_binding tunnel_key logical_port=ls1-l
 
 check_uuid ovn-nbctl create address_set name=as1
 check ovn-nbctl acl-add ls1 to-lport 100 'outport == "ls1-lp1" && ip4.src == $as1' drop
-check ovn-nbctl add address_set as1 addresses 10.0.0.0/24
-check ovn-nbctl --wait=hv sync
-
-AT_CHECK_UNQUOTED([ovs-ofctl dump-flows br-int table=$acl_eval,reg15=0x$port_key | grep -v reply | awk '{print $7, $8}' | sort], [0], [dnl
-priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.0/24 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
-])
 
 check ovn-nbctl add address_set as1 addresses 10.0.0.1
 check ovn-nbctl add address_set as1 addresses 10.0.0.2
@@ -2965,7 +2959,6 @@ check ovn-nbctl add address_set as1 addresses 10.0.0.4
 check ovn-nbctl --wait=hv sync
 
 AT_CHECK_UNQUOTED([ovs-ofctl dump-flows br-int table=$acl_eval,reg15=0x$port_key | grep -v reply | awk '{print $7, $8}' | sort], [0], [dnl
-priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.0/24 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
 priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.1 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
 priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.2 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
 priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.3 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
@@ -2976,11 +2969,24 @@ priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.4 actions=load:0x1->OXM_OF
 check ovn-appctl inc-engine/recompute
 
 AT_CHECK_UNQUOTED([ovs-ofctl dump-flows br-int table=$acl_eval,reg15=0x$port_key | grep -v reply | awk '{print $7, $8}' | sort], [0], [dnl
-priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.0/24 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
 priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.1 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
 priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.2 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
 priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.3 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
 priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.4 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
+])
+
+check ovn-nbctl add address_set as1 addresses 10.0.0.0/24
+check ovn-nbctl --wait=hv sync
+
+AT_CHECK_UNQUOTED([ovs-ofctl dump-flows br-int table=$acl_eval,reg15=0x$port_key | grep -v reply | awk '{print $7, $8}' | sort], [0], [dnl
+priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.0/24 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
+])
+
+
+check ovn-appctl inc-engine/recompute
+
+AT_CHECK_UNQUOTED([ovs-ofctl dump-flows br-int table=$acl_eval,reg15=0x$port_key | grep -v reply | awk '{print $7, $8}' | sort], [0], [dnl
+priority=1100,ip,reg15=0x1,metadata=0x1,nw_src=10.0.0.0/24 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,$acl_sample)
 ])
 
 OVN_CLEANUP([hv1])
