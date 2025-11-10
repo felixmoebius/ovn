@@ -126,6 +126,24 @@ vector_remove_block(struct vector *vec, size_t start, size_t end)
     return true;
 }
 
+/* Removes duplicates from sorted vector while maintaining order. */
+void
+vector_dedup(struct vector *vec, int (*cmp)(const void *a, const void *b))
+{
+    if (vec->len <= 1) {
+        return;
+    }
+
+    size_t i = 0;
+    for (size_t j = 1; j < vec->len; j++) {
+        if (cmp(vector_get_ptr(vec, i), vector_get_ptr(vec, j)) && ++i != j) {
+            memcpy(vector_get_ptr(vec, i), vector_get_ptr(vec, j), vec->esize);
+        }
+    }
+
+    vec->len = i + 1;
+}
+
 /* Gets pointer to the item at index. Note that holding pointer across inserts
  * can cause UB. */
 void *

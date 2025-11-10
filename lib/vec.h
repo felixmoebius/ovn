@@ -77,6 +77,7 @@ void *vector_get_ptr(const struct vector *vec, size_t index);
 void vector_shrink_to_fit(struct vector *vec);
 struct vector vector_clone(struct vector *vec);
 void vector_reserve(struct vector *vec, size_t n);
+void vector_dedup(struct vector *vec, int (*cmp)(const void *a, const void *b));
 
 /* Pushes element into the end of the vector. */
 static inline void
