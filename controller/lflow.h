@@ -16,6 +16,7 @@
 #ifndef OVN_LFLOW_H
 #define OVN_LFLOW_H 1
 
+#include "lib/address-sets.h"
 #include "lib/ovn-util.h"
 #include "lib/objdep.h"
 #include "lib/uuidset.h"
@@ -162,10 +163,6 @@ void lflow_handle_cached_flows(struct lflow_cache *,
 bool lflow_handle_changed_flows(struct lflow_ctx_in *,
                                 struct lflow_ctx_out *);
 
-struct addr_set_diff {
-    struct expr_constant_set *added;
-    struct expr_constant_set *deleted;
-};
 bool lflow_handle_addr_set_update(const char *as_name, struct addr_set_diff *,
                                   struct lflow_ctx_in *,
                                   struct lflow_ctx_out *,

@@ -545,6 +545,7 @@ struct expr_constant_set {
 bool expr_constant_set_parse(struct lexer *, struct expr_constant_set *);
 void expr_constant_set_format(const struct expr_constant_set *, struct ds *);
 void expr_constant_set_destroy(struct expr_constant_set *cs);
+int compare_expr_constant_integer_cb(const void *a_, const void *b_);
 struct expr_constant_set * expr_constant_set_create_integers(
                                 const char *const *values, size_t n_values);
 void expr_constant_set_integers_diff(

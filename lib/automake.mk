@@ -13,6 +13,8 @@ lib_libovn_la_SOURCES = \
 	lib/acl-log.c \
 	lib/acl-log.h \
 	lib/actions.c \
+	lib/address-sets.c \
+	lib/address-sets.h \
 	lib/chassis-index.c \
 	lib/chassis-index.h \
 	lib/copp.c \

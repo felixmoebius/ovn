@@ -18,6 +18,7 @@
 
 #include <getopt.h>
 
+#include "address-sets.h"
 #include "command-line.h"
 #include "compiler.h"
 #include "daemon.h"
@@ -512,7 +513,7 @@ static struct shash ports;
 static struct shash symtab;
 
 /* Address sets. */
-static struct shash address_sets;
+static struct addr_sets address_sets;
 
 /* Port groups. */
 static struct shash port_groups;
@@ -875,13 +876,11 @@ read_mcgroups(void)
 static void
 read_address_sets(void)
 {
-    shash_init(&address_sets);
+    addr_sets_init(&address_sets);
 
     const struct sbrec_address_set *sbas;
     SBREC_ADDRESS_SET_FOR_EACH (sbas, ovnsb_idl) {
-        expr_const_sets_add_integers(&address_sets, sbas->name,
-                                     (const char *const *) sbas->addresses,
-                                     sbas->n_addresses);
+        addr_sets_add(&address_sets, sbas);
     }
 }
 
@@ -993,8 +992,8 @@ parse_lflow_for_datapath(const struct sbrec_logical_flow *sblf,
         }
         struct expr *match;
         match = expr_parse_string(lex_str_get(&match_s), &symtab,
-                                  &address_sets, &port_groups, NULL, NULL,
-                                  dp->tunnel_key, &error);
+                                  &address_sets.const_sets, &port_groups, NULL,
+                                  NULL, dp->tunnel_key, &error);
         lex_str_free(&match_s);
         if (error) {
             VLOG_WARN("%s: parsing expression failed (%s)",
@@ -3726,7 +3725,8 @@ trace_parse(const char *dp_s, const char *flow_s,
             return xasprintf("failed to parse flow expression \"%s\"", flow_s);
         }
         struct expr *e = expr_parse_string(lex_str_get(&flow_exp_s), &symtab,
-                                           &address_sets, &port_groups, NULL,
+                                           &address_sets.const_sets,
+                                           &port_groups, NULL,
                                            NULL, 0, &error);
         lex_str_free(&flow_exp_s);
         if (!e) {
@@ -3759,7 +3759,7 @@ trace_parse(const char *dp_s, const char *flow_s,
         return xasprintf("failed to parse flow expression \"%s\"", flow_s);
     }
     char *error = expr_parse_microflow(lex_str_get(&flow_exp_s), &symtab,
-                                       &address_sets, &port_groups,
+                                       &address_sets.const_sets, &port_groups,
                                        ovntrace_lookup_port, *dpp, uflow);
     lex_str_free(&flow_exp_s);
     if (error) {

@@ -19,6 +19,7 @@
 #include <getopt.h>
 #include <sys/wait.h>
 
+#include "address-sets.h"
 #include "command-line.h"
 #include "dp-packet.h"
 #include "fatal-signal.h"
@@ -218,25 +219,46 @@ create_gen_opts(struct hmap *dhcp_opts, struct hmap *dhcpv6_opts,
 }
 
 static void
-create_addr_sets(struct shash *addr_sets)
+create_addr_sets(struct addr_sets *addr_sets)
 {
-    shash_init(addr_sets);
+    addr_sets_init(addr_sets);
 
-    static const char *const addrs1[] = {
+    static char *addrs1[] = {
         "10.0.0.1", "10.0.0.2", "10.0.0.3",
     };
-    static const char *const addrs2[] = {
+    static char *addrs2[] = {
         "::1", "::2", "::3",
     };
-    static const char *const addrs3[] = {
+    static char *addrs3[] = {
         "00:00:00:00:00:01", "00:00:00:00:00:02", "00:00:00:00:00:03",
     };
-    static const char *const addrs4[] = { NULL };
+    static char *addrs4[] = {};
 
-    expr_const_sets_add_integers(addr_sets, "set1", addrs1, 3);
-    expr_const_sets_add_integers(addr_sets, "set2", addrs2, 3);
-    expr_const_sets_add_integers(addr_sets, "set3", addrs3, 3);
-    expr_const_sets_add_integers(addr_sets, "set4", addrs4, 0);
+    static const struct sbrec_address_set as1 = {
+        .name = "set1",
+        .addresses = addrs1,
+        .n_addresses = ARRAY_SIZE(addrs1),
+    };
+    static const struct sbrec_address_set as2 = {
+        .name = "set2",
+        .addresses = addrs2,
+        .n_addresses = ARRAY_SIZE(addrs2),
+    };
+    static const struct sbrec_address_set as3 = {
+        .name = "set3",
+        .addresses = addrs3,
+        .n_addresses = ARRAY_SIZE(addrs3),
+    };
+    static const struct sbrec_address_set as4 = {
+        .name = "set4",
+        .addresses = addrs4,
+        .n_addresses = ARRAY_SIZE(addrs4),
+    };
+
+    addr_sets_add(addr_sets, &as1);
+    addr_sets_add(addr_sets, &as2);
+    addr_sets_add(addr_sets, &as3);
+    addr_sets_add(addr_sets, &as4);
 }
 
 static void
@@ -293,7 +315,7 @@ static void
 test_parse_expr__(int steps)
 {
     struct shash symtab;
-    struct shash addr_sets;
+    struct addr_sets addr_sets;
     struct shash port_groups;
     struct smap template_vars;
     struct simap ports;
@@ -317,8 +339,9 @@ test_parse_expr__(int steps)
         struct expr *expr;
         char *error;
 
-        expr = expr_parse_string(ds_cstr(&input), &symtab, &addr_sets,
-                                 &port_groups, NULL, NULL, 0, &error);
+        expr = expr_parse_string(ds_cstr(&input), &symtab,
+                                 &addr_sets.const_sets, &port_groups,
+                                 NULL, NULL, 0, &error);
         if (!error && steps > 0) {
             expr = expr_annotate(expr, &symtab, &error);
         }
@@ -357,8 +380,7 @@ test_parse_expr__(int steps)
     simap_destroy(&ports);
     expr_symtab_destroy(&symtab);
     shash_destroy(&symtab);
-    expr_const_sets_destroy(&addr_sets);
-    shash_destroy(&addr_sets);
+    addr_sets_destroy(&addr_sets);
     expr_const_sets_destroy(&port_groups);
     shash_destroy(&port_groups);
     smap_destroy(&template_vars);

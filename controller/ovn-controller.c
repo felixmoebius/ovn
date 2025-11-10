@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "address-sets.h"
 #include "bfd.h"
 #include "binding.h"
 #include "chassis.h"
@@ -1953,11 +1954,8 @@ en_template_vars_cleanup(void *data)
 }
 
 struct ed_type_addr_sets {
-    struct shash addr_sets;
     bool change_tracked;
-    struct sset new;
-    struct sset deleted;
-    struct shash updated;
+    struct addr_sets addr_sets;
 };
 
 static void *
@@ -1966,11 +1964,9 @@ en_addr_sets_init(struct engine_node *node OVS_UNUSED,
 {
     struct ed_type_addr_sets *as = xzalloc(sizeof *as);
 
-    shash_init(&as->addr_sets);
     as->change_tracked = false;
-    sset_init(&as->new);
-    sset_init(&as->deleted);
-    shash_init(&as->updated);
+    addr_sets_init(&as->addr_sets);
+
     return as;
 }
 
@@ -1978,17 +1974,8 @@ static void
 en_addr_sets_clear_tracked_data(void *data)
 {
     struct ed_type_addr_sets *as = data;
-    sset_clear(&as->new);
-    sset_clear(&as->deleted);
-    struct shash_node *node;
-    SHASH_FOR_EACH_SAFE (node, &as->updated) {
-        struct addr_set_diff *asd = node->data;
-        expr_constant_set_destroy(asd->added);
-        free(asd->added);
-        expr_constant_set_destroy(asd->deleted);
-        free(asd->deleted);
-    }
-    shash_clear_free_data(&as->updated);
+
+    addr_sets_clear_tracked_changes(&as->addr_sets);
     as->change_tracked = false;
 }
 
@@ -1998,71 +1985,8 @@ en_addr_sets_cleanup(void *data)
     en_addr_sets_clear_tracked_data(data);
 
     struct ed_type_addr_sets *as = data;
-    expr_const_sets_destroy(&as->addr_sets);
-    shash_destroy(&as->addr_sets);
-    sset_destroy(&as->new);
-    sset_destroy(&as->deleted);
-    shash_destroy(&as->updated);
-}
 
-/* Iterate address sets in the southbound database.  Create and update the
- * corresponding symtab entries as necessary. */
-static void
-addr_sets_init(const struct sbrec_address_set_table *address_set_table,
-               struct shash *addr_sets)
-{
-    const struct sbrec_address_set *as;
-    SBREC_ADDRESS_SET_TABLE_FOR_EACH (as, address_set_table) {
-        expr_const_sets_add_integers(addr_sets, as->name,
-                                     (const char *const *) as->addresses,
-                                     as->n_addresses);
-    }
-}
-
-static void
-addr_sets_update(const struct sbrec_address_set_table *address_set_table,
-                 struct shash *addr_sets, struct sset *added,
-                 struct sset *deleted, struct shash *updated)
-{
-    const struct sbrec_address_set *as;
-    SBREC_ADDRESS_SET_TABLE_FOR_EACH_TRACKED (as, address_set_table) {
-        if (sbrec_address_set_is_deleted(as)) {
-            expr_const_sets_remove(addr_sets, as->name);
-            sset_add(deleted, as->name);
-        }
-    }
-
-    SBREC_ADDRESS_SET_TABLE_FOR_EACH_TRACKED (as, address_set_table) {
-        if (!sbrec_address_set_is_deleted(as)) {
-            struct expr_constant_set *cs_old = shash_find_data(addr_sets,
-                                                               as->name);
-            if (!cs_old) {
-                sset_add(added, as->name);
-                expr_const_sets_add_integers(addr_sets, as->name,
-                    (const char *const *) as->addresses, as->n_addresses);
-            } else {
-                /* Find out the diff for the updated address set. */
-                struct expr_constant_set *cs_new =
-                    expr_constant_set_create_integers(
-                        (const char *const *) as->addresses, as->n_addresses);
-                struct addr_set_diff *as_diff = xmalloc(sizeof *as_diff);
-                expr_constant_set_integers_diff(cs_old, cs_new,
-                                                &as_diff->added,
-                                                &as_diff->deleted);
-                if (!as_diff->added && !as_diff->deleted) {
-                    /* The address set may have been updated, but the change
-                     * doesn't has any impact to the generated constant-set.
-                     * For example, ff::01 is changed to ff::00:01. */
-                    free(as_diff);
-                    expr_constant_set_destroy(cs_new);
-                    free(cs_new);
-                    continue;
-                }
-                shash_add(updated, as->name, as_diff);
-                expr_const_sets_add(addr_sets, as->name, cs_new);
-            }
-        }
-    }
+    addr_sets_destroy(&as->addr_sets);
 }
 
 static enum engine_node_state
@@ -2070,13 +1994,16 @@ en_addr_sets_run(struct engine_node *node, void *data)
 {
     struct ed_type_addr_sets *as = data;
 
-    expr_const_sets_destroy(&as->addr_sets);
+    addr_sets_clear(&as->addr_sets);
 
     struct sbrec_address_set_table *as_table =
         (struct sbrec_address_set_table *)EN_OVSDB_GET(
             engine_get_input("SB_address_set", node));
 
-    addr_sets_init(as_table, &as->addr_sets);
+    const struct sbrec_address_set *sb;
+    SBREC_ADDRESS_SET_TABLE_FOR_EACH (sb, as_table) {
+        addr_sets_add(&as->addr_sets, sb);
+    }
 
     as->change_tracked = false;
     return EN_UPDATED;
@@ -2086,24 +2013,30 @@ static enum engine_input_handler_result
 addr_sets_sb_address_set_handler(struct engine_node *node, void *data)
 {
     struct ed_type_addr_sets *as = data;
-    enum engine_input_handler_result result;
 
     struct sbrec_address_set_table *as_table =
         (struct sbrec_address_set_table *)EN_OVSDB_GET(
             engine_get_input("SB_address_set", node));
 
-    addr_sets_update(as_table, &as->addr_sets, &as->new,
-                     &as->deleted, &as->updated);
+    const struct sbrec_address_set *sb;
+    SBREC_ADDRESS_SET_TABLE_FOR_EACH_TRACKED (sb, as_table) {
+        if (sbrec_address_set_is_deleted(sb)) {
+            addr_sets_del(&as->addr_sets, sb);
+        }
+    }
 
-    if (!sset_is_empty(&as->new) || !sset_is_empty(&as->deleted) ||
-            !shash_is_empty(&as->updated)) {
-        result = EN_HANDLED_UPDATED;
-    } else {
-        result = EN_HANDLED_UNCHANGED;
+    SBREC_ADDRESS_SET_TABLE_FOR_EACH_TRACKED (sb, as_table) {
+        if (!sbrec_address_set_is_deleted(sb)) {
+            addr_sets_add(&as->addr_sets, sb);
+        }
     }
 
     as->change_tracked = true;
-    return result;
+    if (addr_sets_changed(&as->addr_sets)) {
+        return EN_HANDLED_UPDATED;
+    } else {
+        return EN_HANDLED_UNCHANGED;
+    }
 }
 
 struct ed_type_port_groups{
@@ -3877,7 +3810,7 @@ init_lflow_ctx(struct engine_node *node,
 
     struct ed_type_addr_sets *as_data =
         engine_get_input_data("addr_sets", node);
-    struct shash *addr_sets = &as_data->addr_sets;
+    struct shash *addr_sets = &as_data->addr_sets.const_sets;
 
     struct ed_type_port_groups *pg_data =
         engine_get_input_data("port_groups", node);
@@ -4255,7 +4188,7 @@ lflow_output_addr_sets_handler(struct engine_node *node, void *data)
         return EN_UNHANDLED;
     }
 
-    SSET_FOR_EACH (ref_name, &as_data->deleted) {
+    SSET_FOR_EACH (ref_name, &as_data->addr_sets.deleted) {
         if (!objdep_mgr_handle_change(l_ctx_out.lflow_deps_mgr,
                                       OBJDEP_TYPE_ADDRSET, ref_name,
                                       lflow_handle_changed_ref,
@@ -4268,7 +4201,7 @@ lflow_output_addr_sets_handler(struct engine_node *node, void *data)
         }
     }
     struct shash_node *shash_node;
-    SHASH_FOR_EACH (shash_node, &as_data->updated) {
+    SHASH_FOR_EACH (shash_node, &as_data->addr_sets.updated) {
         struct addr_set_diff *as_diff = shash_node->data;
         if (!lflow_handle_addr_set_update(shash_node->name, as_diff, &l_ctx_in,
                                           &l_ctx_out, &changed)) {
@@ -4287,7 +4220,7 @@ lflow_output_addr_sets_handler(struct engine_node *node, void *data)
             result = EN_HANDLED_UPDATED;
         }
     }
-    SSET_FOR_EACH (ref_name, &as_data->new) {
+    SSET_FOR_EACH (ref_name, &as_data->addr_sets.addded) {
         if (!objdep_mgr_handle_change(l_ctx_out.lflow_deps_mgr,
                                       OBJDEP_TYPE_ADDRSET, ref_name,
                                       lflow_handle_changed_ref,
@@ -7816,7 +7749,8 @@ main(int argc, char *argv[])
                     engine_get_data(&en_template_vars);
                 if (br_int && chassis && as_data && pg_data && tv_data) {
                     char *error = ofctrl_inject_pkt(br_int, pending_pkt.flow_s,
-                        &as_data->addr_sets, &pg_data->port_groups_cs_local,
+                        &as_data->addr_sets.const_sets,
+                        &pg_data->port_groups_cs_local,
                         &tv_data->local_templates);
                     if (error) {
                         unixctl_command_reply_error(pending_pkt.conn, error);

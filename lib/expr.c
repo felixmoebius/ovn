@@ -1059,7 +1059,7 @@ expr_constant_set_destroy(struct expr_constant_set *cs)
     }
 }
 
-static int
+int
 compare_expr_constant_integer_cb(const void *a_, const void *b_)
 {
     const struct expr_constant *a = a_;
