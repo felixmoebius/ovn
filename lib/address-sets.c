@@ -137,6 +137,7 @@ addr_sets_add(struct addr_sets *as, const struct sbrec_address_set *sb)
     }
 
     vector_qsort(&as_new->values, compare_expr_constant_integer_cb);
+    vector_dedup(&as_new->values, compare_expr_constant_integer_cb);
 
     struct expr_constant_set *as_old = shash_find_data(&as->const_sets,
                                                        sb->name);
