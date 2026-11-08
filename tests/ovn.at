@@ -30410,6 +30410,95 @@ AT_CLEANUP
 ])
 
 OVN_FOR_EACH_NORTHD([
+AT_SETUP([Forwarding group liveness - child port chassis change])
+AT_KEYWORDS([forwarding-group])
+ovn_start
+
+# The fwd_group buckets with liveness watch the tunnel port towards the
+# chassis the child port is bound to.  Make sure hv1 updates the group
+# incrementally when a remote child port gets bound, unbound and moved.
+check ovn-nbctl ls-add ls
+check ovn-nbctl lsp-add ls lsp1 \
+    -- lsp-set-addresses lsp1 "00:00:00:01:01:01 172.16.1.1"
+check ovn-nbctl lsp-add ls lsp21 \
+    -- lsp-set-addresses lsp21 "00:00:00:01:02:01 172.16.1.2"
+check ovn-nbctl lsp-add ls lsp22 \
+    -- lsp-set-addresses lsp22 "00:00:00:01:02:02 172.16.1.3"
+
+net_add n1
+for i in 1 2 3; do
+    sim_add hv$i
+    as hv$i
+    check ovs-vsctl add-br br-phys
+    ovn_attach n1 br-phys 192.168.0.$i
+done
+
+as hv1 check ovs-vsctl add-port br-int vif1 -- \
+    set Interface vif1 external-ids:iface-id=lsp1
+as hv2 check ovs-vsctl add-port br-int vif22 -- \
+    set Interface vif22 external-ids:iface-id=lsp22
+wait_for_ports_up lsp1 lsp22
+
+hv2_uuid=$(fetch_column Chassis _uuid name=hv2)
+hv3_uuid=$(fetch_column Chassis _uuid name=hv3)
+ofport_hv2=$(as hv1 ovs-vsctl --bare --columns ofport find Interface name=ovn-hv2-0)
+ofport_hv3=$(as hv1 ovs-vsctl --bare --columns ofport find Interface name=ovn-hv3-0)
+key21=$(fetch_column Port_Binding tunnel_key logical_port=lsp21)
+key22=$(fetch_column Port_Binding tunnel_key logical_port=lsp22)
+
+# lsp21 is not bound anywhere yet.
+check ovn-nbctl --wait=hv --liveness fwd-group-add fwd_grp ls \
+    172.16.1.11 00:11:de:ad:be:ef lsp21 lsp22
+
+# For checking that we are processing the following changes incrementally
+check as hv1 ovn-appctl -t ovn-controller inc-engine/clear-stats
+
+AT_CAPTURE_FILE([ofgroups])
+check_bucket() {
+    as hv1 ovs-ofctl -O OpenFlow13 dump-groups br-int > ofgroups
+    grep -c "bucket=watch_port:$1,actions=load:0x$2" ofgroups
+}
+
+# Bind lsp21 on hv2.
+as hv2 check ovs-vsctl add-port br-int vif21 -- \
+    set Interface vif21 external-ids:iface-id=lsp21
+wait_for_ports_up lsp21
+wait_column "$hv2_uuid" Port_Binding chassis logical_port=lsp21
+check ovn-nbctl --wait=hv sync
+AT_CHECK([check_bucket $ofport_hv2 $key21], [0], [1
+])
+AT_CHECK([check_bucket $ofport_hv2 $key22], [0], [1
+])
+
+# Unbind lsp21, the bucket must no longer watch the tunnel to hv2.
+as hv2 check ovs-vsctl del-port vif21
+wait_column "" Port_Binding chassis logical_port=lsp21
+check ovn-nbctl --wait=hv sync
+AT_CHECK([check_bucket $ofport_hv2 $key21], [1], [0
+])
+
+# Bind lsp21 on hv3.
+as hv3 check ovs-vsctl add-port br-int vif21 -- \
+    set Interface vif21 external-ids:iface-id=lsp21
+wait_for_ports_up lsp21
+wait_column "$hv3_uuid" Port_Binding chassis logical_port=lsp21
+check ovn-nbctl --wait=hv sync
+AT_CHECK([check_bucket $ofport_hv2 $key21], [1], [0
+])
+AT_CHECK([check_bucket $ofport_hv3 $key21], [0], [1
+])
+AT_CHECK([check_bucket $ofport_hv2 $key22], [0], [1
+])
+
+AT_CHECK([as hv1 ovn-appctl -t ovn-controller \
+          inc-engine/show-stats lflow_output recompute], [0], [0
+])
+
+OVN_CLEANUP([hv1], [hv2], [hv3])
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD([
 AT_SETUP([Load Balancer LS hairpin])
 ovn_start
 

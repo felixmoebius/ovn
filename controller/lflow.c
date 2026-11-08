@@ -182,6 +182,13 @@ tunnel_ofport_cb(const void *aux_, const char *port_name, ofp_port_t *ofport)
 {
     const struct lookup_port_aux *aux = aux_;
 
+    /* The resulting ofport depends on the chassis the lport is bound to.
+     * Store the name so that in the future when the lport's chassis
+     * changes, the logical flow that references this lport can be
+     * reprocessed. */
+    objdep_mgr_add(aux->deps_mgr, OBJDEP_TYPE_PORTBINDING_CHASSIS, port_name,
+                   &aux->lflow->header_.uuid);
+
     const struct sbrec_port_binding *pb
         = lport_lookup_by_name(aux->sbrec_port_binding_by_name, port_name);
     if (!pb || (pb->datapath != aux->dp) || !pb->chassis) {
@@ -2225,7 +2232,7 @@ lflow_handle_flows_for_lport(const struct sbrec_port_binding *pb,
     return true;
 }
 
-/* Handles port-binding add/deletions. */
+/* Handles port-binding add/deletions and chassis changes. */
 bool
 lflow_handle_changed_port_bindings(struct lflow_ctx_in *l_ctx_in,
                                    struct lflow_ctx_out *l_ctx_out)
@@ -2235,12 +2242,17 @@ lflow_handle_changed_port_bindings(struct lflow_ctx_in *l_ctx_in,
     const struct sbrec_port_binding *pb;
     SBREC_PORT_BINDING_TABLE_FOR_EACH_TRACKED (pb,
                                                l_ctx_in->port_binding_table) {
-        if (!sbrec_port_binding_is_new(pb)
-            && !sbrec_port_binding_is_deleted(pb)) {
+        enum objdep_type type;
+        if (sbrec_port_binding_is_new(pb)
+            || sbrec_port_binding_is_deleted(pb)) {
+            type = OBJDEP_TYPE_PORTBINDING;
+        } else if (sbrec_port_binding_is_updated(
+                       pb, SBREC_PORT_BINDING_COL_CHASSIS)) {
+            type = OBJDEP_TYPE_PORTBINDING_CHASSIS;
+        } else {
             continue;
         }
-        if (!objdep_mgr_handle_change(l_ctx_out->lflow_deps_mgr,
-                                      OBJDEP_TYPE_PORTBINDING,
+        if (!objdep_mgr_handle_change(l_ctx_out->lflow_deps_mgr, type,
                                       pb->logical_port,
                                       lflow_handle_changed_ref,
                                       l_ctx_out->objs_processed,
